@@ -1,4 +1,16 @@
-import { getUser, updateProfile } from '../db.js';
+import { getUser, updateProfile, setUserTimezone } from '../db.js';
+
+export async function tool_set_timezone(userId: number, args: { timezone: string }) {
+  try {
+    // Validate the timezone is real
+    new Intl.DateTimeFormat('en', { timeZone: args.timezone });
+    setUserTimezone(userId, args.timezone);
+    const now = new Date().toLocaleString('en-GB', { timeZone: args.timezone });
+    return { success: true, timezone: args.timezone, local_time: now };
+  } catch {
+    return { success: false, message: `Invalid timezone: ${args.timezone}. Use IANA format e.g. Asia/Kolkata` };
+  }
+}
 
 export async function tool_set_profile(userId: number, args: Record<string, any>) {
   const merged = updateProfile(userId, args);

@@ -2,38 +2,54 @@
  * NinjaPA — Telegram Bot handlers.
  * Multi-user: every message is isolated by ctx.from.id.
  */
-import { Telegraf, Context } from 'telegraf';
+import { Telegraf, Context, Markup } from 'telegraf';
 import { message } from 'telegraf/filters';
 import fs from 'fs';
-import { upsertUser, getUser } from './db.js';
+import cron from 'node-cron';
+import { upsertUser, getUser, getDailyUsage, incrementDailyUsage, listTasks, completeTask, deleteTask, listReminders, cancelReminder } from './db.js';
 import { processMessage } from './ai.js';
+import { cancelScheduledReminder } from './scheduler.js';
 
 const FREE_DAILY_LIMIT = parseInt(process.env.FREE_TASKS_PER_DAY ?? '10');
 
-// Simple in-memory rate limiter (resets each day via process restart or cron)
-const dailyUsage = new Map<number, number>();
+// ── Quotes for morning / noon / evening ───────────────────────────────────────
+const QUOTES = {
+  morning: [
+    '🌅 *Good morning!* "The secret of getting ahead is getting started." — Mark Twain',
+    '🌅 *Good morning!* "What you do today can improve all your tomorrows." — Ralph Marston',
+    '🌅 *Good morning!* "Each morning we are born again. What we do today matters most." — Buddha',
+    '🌅 *Good morning!* "Wake up with determination. Go to bed with satisfaction."',
+    '🌅 *Good morning!* "Your future is created by what you do today, not tomorrow." — Robert Kiyosaki',
+  ],
+  noon: [
+    '☀️ *Midday check-in!* Half the day done — how are your tasks going? 💪',
+    '☀️ *Lunch break reminder!* Step away, eat well, recharge. You\'ve earned it.',
+    '☀️ *Midday boost!* "It does not matter how slowly you go as long as you do not stop." — Confucius',
+    '☀️ *Noon nudge!* Take a 5-minute walk. Your afternoon self will thank you.',
+    '☀️ *Midday check-in!* "Believe you can and you\'re halfway there." — Theodore Roosevelt',
+  ],
+  night: [
+    '🌙 *Good evening!* "Almost everything will work again if you unplug it for a few minutes — including you." — Anne Lamott',
+    '🌙 *Wind down time!* Review today\'s wins, forgive the misses, plan tomorrow.',
+    '🌙 *Good evening!* "Rest when you\'re weary. Refresh and renew yourself, your body, your mind." — Ralph Marston',
+    '🌙 *Evening reminder!* Hydrate, stretch, disconnect. Tomorrow is a fresh start.',
+    '🌙 *Good night!* "The day is over, night has come. Today is gone, what\'s done is done." — poem',
+  ],
+};
 
+function randomQuote(type: keyof typeof QUOTES): string {
+  const list = QUOTES[type];
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
 function isAllowed(userId: number): boolean {
   const adminIds = (process.env.ADMIN_USER_IDS ?? '').split(',').map(s => parseInt(s.trim())).filter(Boolean);
   if (adminIds.includes(userId)) return true;
-
   const user = getUser(userId);
   if (user?.plan === 'pro') return true;
-
-  const used = dailyUsage.get(userId) ?? 0;
-  return used < FREE_DAILY_LIMIT;
+  return getDailyUsage(userId) < FREE_DAILY_LIMIT;
 }
-
-function incrementUsage(userId: number) {
-  dailyUsage.set(userId, (dailyUsage.get(userId) ?? 0) + 1);
-}
-
-// Reset daily usage at midnight
-import cron from 'node-cron';
-cron.schedule('0 0 * * *', () => {
-  dailyUsage.clear();
-  console.log('[bot] Daily usage reset.');
-});
 
 // ── Build the bot ─────────────────────────────────────────────────────────────
 export function createBot(token: string) {
@@ -46,49 +62,49 @@ export function createBot(token: string) {
 
     await ctx.replyWithMarkdown(
       `👋 Hey ${first_name ?? 'there'}! I'm *NinjaPA* — your personal AI assistant.\n\n` +
-      `Here's what I can do for you:\n\n` +
-      `📋 *Tasks & Reminders*\n` +
-      `_"Remind me to call dentist tomorrow at 3pm"_\n` +
-      `_"Add review contracts to my task list"_\n\n` +
-      `📝 *Notes*\n` +
-      `_"Note: client wants the design in blue"_\n\n` +
-      `📄 *Invoices*\n` +
-      `_"Invoice John Smith £800 for web development"_\n\n` +
-      `✈️ *Flight Alerts*\n` +
-      `_"Watch London to Chennai flights under £380"_\n\n` +
-      `🥗 *Diet Plan*\n` +
-      `_"I'm 38, 78kg, want to lose weight — create a diet plan"_\n\n` +
-      `🗺️ *Travel Planning*\n` +
-      `_"Plan a 5-day trip to Tokyo, budget £2000"_\n\n` +
-      `⏰ *Standup Reminders*\n` +
-      `_"Remind me to stand up every 45 minutes 9am to 6pm"_\n\n` +
-      `Just talk to me naturally — no commands needed. Let's go! 🥷`
+      `📋 *Tasks & Reminders* — _"Remind me to call dentist tomorrow 3pm"_\n` +
+      `📝 *Notes* — _"Note: client wants the design in blue"_\n` +
+      `📄 *Invoices* — _"Invoice John £800 for web dev"_\n` +
+      `✈️ *Flight Alerts* — _"Watch LHR to Chennai flights under £380"_\n` +
+      `🥗 *Diet Plan* — _"I'm 38, 78kg, want to lose weight"_\n` +
+      `🗺️ *Travel* — _"Plan a 5-day Tokyo trip, budget £2000"_\n` +
+      `⏰ *Standup* — _"Remind me to stand up every 45 minutes"_\n\n` +
+      `Just talk to me naturally — no commands needed.\n\n` +
+      `💡 *First, tell me your timezone* so reminders fire at the right time:\n` +
+      `_"I'm in India"_ or _"My timezone is America/New_York"_\n\n` +
+      `Let's go! 🥷`
     );
   });
 
   // ── /help ─────────────────────────────────────────────────────────────────
   bot.help(async (ctx) => {
     await ctx.replyWithMarkdown(
-      `*NinjaPA Commands*\n\n` +
-      `Just type naturally. Examples:\n\n` +
-      `• _"What are my tasks?"_\n` +
-      `• _"Mark dentist appointment done"_\n` +
-      `• _"Show my notes"_\n` +
-      `• _"List my flight watches"_\n` +
-      `• _"Show my profile"_\n` +
-      `• _"What reminders do I have?"_\n\n` +
-      `*/upgrade* — See Pro plan features\n` +
-      `*/profile* — View your saved profile\n` +
-      `*/tasks* — List pending tasks\n` +
-      `*/notes* — List recent notes`
+      `*NinjaPA — Quick Reference*\n\n` +
+      `*/tasks* — Task list with tap-to-complete buttons\n` +
+      `*/reminders* — Active reminders with cancel buttons\n` +
+      `*/notes* — Recent notes\n` +
+      `*/profile* — Your saved profile\n` +
+      `*/upgrade* — Pro plan details\n\n` +
+      `Or just type naturally:\n` +
+      `• _"Add task: review contracts by Friday"_\n` +
+      `• _"Remind me to drink water every hour 9am-6pm"_\n` +
+      `• _"Invoice Sarah £1200 for design work"_\n` +
+      `• _"My timezone is Asia/Kolkata"_`
     );
   });
 
-  // ── /tasks shortcut ───────────────────────────────────────────────────────
+  // ── /tasks — interactive list with inline buttons ─────────────────────────
   bot.command('tasks', async (ctx) => {
     const userId = ctx.from.id;
     upsertUser(userId, ctx.from.username, ctx.from.first_name);
-    await handleMessage(ctx, userId, 'List my pending tasks');
+    await sendTaskList(ctx, userId);
+  });
+
+  // ── /reminders — interactive list with cancel buttons ────────────────────
+  bot.command('reminders', async (ctx) => {
+    const userId = ctx.from.id;
+    upsertUser(userId, ctx.from.username, ctx.from.first_name);
+    await sendReminderList(ctx, userId);
   });
 
   // ── /notes shortcut ───────────────────────────────────────────────────────
@@ -115,10 +131,45 @@ export function createBot(token: string) {
       `✅ Unlimited notes\n` +
       `✅ Diet plans + meal reminders\n` +
       `✅ Full travel planning\n` +
+      `✅ Morning, noon & evening motivational quotes\n` +
       `✅ Priority AI response\n\n` +
-      `Free plan: 10 messages/day, 2 invoices/month, 1 flight watch.\n\n` +
-      `👉 [Upgrade now](https://ninjapa.app/upgrade) ← coming soon`
+      `Free plan: ${FREE_DAILY_LIMIT} messages/day, 2 invoices/month, 1 flight watch.\n\n` +
+      `👉 Coming soon at ninjapa.app/upgrade`
     );
+  });
+
+  // ── Inline button: complete task ──────────────────────────────────────────
+  bot.action(/^done_(\d+)_(\d+)$/, async (ctx) => {
+    const taskId = parseInt(ctx.match[1]);
+    const userId = parseInt(ctx.match[2]);
+    if (ctx.from.id !== userId) return ctx.answerCbQuery('Not your task!');
+
+    completeTask(userId, taskId);
+    await ctx.answerCbQuery('✅ Done!');
+    await sendTaskList(ctx, userId, ctx.callbackQuery.message?.message_id);
+  });
+
+  // ── Inline button: delete task ────────────────────────────────────────────
+  bot.action(/^del_(\d+)_(\d+)$/, async (ctx) => {
+    const taskId = parseInt(ctx.match[1]);
+    const userId = parseInt(ctx.match[2]);
+    if (ctx.from.id !== userId) return ctx.answerCbQuery('Not your task!');
+
+    deleteTask(userId, taskId);
+    await ctx.answerCbQuery('🗑️ Deleted');
+    await sendTaskList(ctx, userId, ctx.callbackQuery.message?.message_id);
+  });
+
+  // ── Inline button: cancel reminder ────────────────────────────────────────
+  bot.action(/^cancel_rem_(\d+)_(\d+)$/, async (ctx) => {
+    const remId = parseInt(ctx.match[1]);
+    const userId = parseInt(ctx.match[2]);
+    if (ctx.from.id !== userId) return ctx.answerCbQuery('Not yours!');
+
+    cancelReminder(userId, remId);
+    cancelScheduledReminder(remId);
+    await ctx.answerCbQuery('🚫 Reminder cancelled');
+    await sendReminderList(ctx, userId, ctx.callbackQuery.message?.message_id);
   });
 
   // ── Main message handler ──────────────────────────────────────────────────
@@ -128,33 +179,98 @@ export function createBot(token: string) {
 
     if (!isAllowed(userId)) {
       await ctx.reply(
-        '⚡ You\'ve hit your free daily limit (10 messages).\n\n' +
+        `⚡ You've hit your free daily limit (${FREE_DAILY_LIMIT} messages).\n\n` +
         'Upgrade to Pro for unlimited access: /upgrade'
       );
       return;
     }
 
-    incrementUsage(userId);
+    incrementDailyUsage(userId);
     await handleMessage(ctx, userId, ctx.message.text);
   });
 
   return bot;
 }
 
+// ── Task list with inline buttons ────────────────────────────────────────────
+async function sendTaskList(ctx: Context, userId: number, editMessageId?: number) {
+  const tasks = listTasks(userId, false);
+
+  if (tasks.length === 0) {
+    const text = '✅ *No pending tasks!* All clear.';
+    if (editMessageId) {
+      await (ctx as any).editMessageText(text, { parse_mode: 'Markdown' });
+    } else {
+      await ctx.replyWithMarkdown(text);
+    }
+    return;
+  }
+
+  const priorityEmoji: Record<string, string> = { high: '🔴', medium: '🟡', low: '🟢' };
+
+  let text = `📋 *Pending Tasks (${tasks.length})*\n\n`;
+  const buttons = tasks.slice(0, 8).map(t => {
+    const due = t.due_at ? ` · ${new Date(t.due_at).toLocaleDateString('en-GB')}` : '';
+    const pr = priorityEmoji[t.priority] ?? '🟡';
+    text += `${pr} *${t.title}*${due}\n`;
+    return [
+      Markup.button.callback(`✅ Done #${t.id}`, `done_${t.id}_${userId}`),
+      Markup.button.callback(`🗑️`, `del_${t.id}_${userId}`),
+    ];
+  });
+
+  const keyboard = Markup.inlineKeyboard(buttons);
+
+  if (editMessageId) {
+    await (ctx as any).editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard.reply_markup });
+  } else {
+    await ctx.replyWithMarkdown(text, keyboard);
+  }
+}
+
+// ── Reminder list with cancel buttons ────────────────────────────────────────
+async function sendReminderList(ctx: Context, userId: number, editMessageId?: number) {
+  const reminders = listReminders(userId);
+
+  if (reminders.length === 0) {
+    const text = '⏰ *No active reminders.*';
+    if (editMessageId) {
+      await (ctx as any).editMessageText(text, { parse_mode: 'Markdown' });
+    } else {
+      await ctx.replyWithMarkdown(text);
+    }
+    return;
+  }
+
+  let text = `⏰ *Active Reminders (${reminders.length})*\n\n`;
+  const buttons = reminders.slice(0, 8).map(r => {
+    const schedule = r.once_at
+      ? new Date(r.once_at).toLocaleString('en-GB')
+      : (r.cron_expr ?? 'recurring');
+    text += `• *${r.message}*\n  _${schedule}_\n\n`;
+    return [Markup.button.callback(`🚫 Cancel #${r.id}`, `cancel_rem_${r.id}_${userId}`)];
+  });
+
+  const keyboard = Markup.inlineKeyboard(buttons);
+
+  if (editMessageId) {
+    await (ctx as any).editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard.reply_markup });
+  } else {
+    await ctx.replyWithMarkdown(text, keyboard);
+  }
+}
+
 // ── Shared message handler ────────────────────────────────────────────────────
 async function handleMessage(ctx: Context, userId: number, text: string) {
-  // Show typing indicator
   await ctx.sendChatAction('typing');
 
   try {
     const { text: reply, pdfPath } = await processMessage(userId, text);
 
-    // Send PDF if an invoice was generated
     if (pdfPath && fs.existsSync(pdfPath)) {
       await ctx.replyWithDocument({ source: pdfPath }, { caption: '📄 Your invoice is ready.' });
     }
 
-    // Send text response (split if over Telegram's 4096 char limit)
     if (reply) {
       const chunks = splitMessage(reply, 4000);
       for (const chunk of chunks) {
@@ -185,4 +301,26 @@ export function createNotifier(bot: Telegraf) {
       console.error(`[notifier] Failed to send to ${userId}:`, err.message);
     });
   };
+}
+
+// ── Daily quote scheduler ─────────────────────────────────────────────────────
+export function startQuoteScheduler(bot: Telegraf) {
+  // Morning quote — 8 AM UTC (adjust per user TZ is done in scheduler via user.timezone)
+  cron.schedule('0 8 * * *', () => sendQuotesToAll(bot, 'morning'));
+  // Noon nudge — 12 PM UTC
+  cron.schedule('0 12 * * *', () => sendQuotesToAll(bot, 'noon'));
+  // Evening wind-down — 7 PM UTC
+  cron.schedule('0 19 * * *', () => sendQuotesToAll(bot, 'night'));
+
+  console.log('[bot] Quote scheduler started (8am / 12pm / 7pm UTC).');
+}
+
+async function sendQuotesToAll(bot: Telegraf, type: keyof typeof QUOTES) {
+  const { db } = await import('./db.js');
+  // Only send to pro users (free users get it as a taster once, then upgrade)
+  const users = db.prepare("SELECT id FROM users WHERE plan = 'pro'").all() as { id: number }[];
+  const quote = randomQuote(type);
+  for (const user of users) {
+    bot.telegram.sendMessage(user.id, quote, { parse_mode: 'Markdown' }).catch(() => {});
+  }
 }

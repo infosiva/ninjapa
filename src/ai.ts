@@ -14,7 +14,7 @@ import { tool_add_reminder, tool_list_reminders, tool_cancel_reminder } from './
 import { tool_save_note, tool_search_notes, tool_list_notes } from './tools/notes.js';
 import { tool_generate_invoice, tool_list_invoices } from './tools/invoices.js';
 import { tool_watch_flight, tool_list_flight_watches } from './tools/flights.js';
-import { tool_set_profile, tool_get_profile, tool_create_diet_plan, tool_plan_trip } from './tools/profile.js';
+import { tool_set_profile, tool_get_profile, tool_create_diet_plan, tool_plan_trip, tool_set_timezone } from './tools/profile.js';
 
 // ── Tool Definitions (JSON Schema for Claude) ─────────────────────────────────
 const TOOLS: Anthropic.Tool[] = [
@@ -226,6 +226,17 @@ const TOOLS: Anthropic.Tool[] = [
       required: ['destination', 'duration_days'],
     },
   },
+  {
+    name: 'set_timezone',
+    description: 'Set the user\'s timezone so reminders and times are correct. Call this when a user mentions their location or timezone.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        timezone: { type: 'string', description: 'IANA timezone name e.g. Asia/Kolkata, America/New_York, Europe/London, Asia/Singapore' },
+      },
+      required: ['timezone'],
+    },
+  },
 ];
 
 // ── Tool executor ─────────────────────────────────────────────────────────────
@@ -249,6 +260,7 @@ async function executeTool(userId: number, name: string, args: any): Promise<any
     case 'get_profile':        return tool_get_profile(userId);
     case 'create_diet_plan':   return tool_create_diet_plan(userId, args);
     case 'plan_trip':          return tool_plan_trip(userId, args);
+    case 'set_timezone':       return tool_set_timezone(userId, args);
     default: return { error: `Unknown tool: ${name}` };
   }
 }
@@ -256,7 +268,8 @@ async function executeTool(userId: number, name: string, args: any): Promise<any
 // ── System prompt ─────────────────────────────────────────────────────────────
 function buildSystemPrompt(user: any): string {
   const profile = JSON.parse(user?.profile ?? '{}');
-  const now = new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' });
+  const tz = user?.timezone ?? 'Europe/London';
+  const now = new Date().toLocaleString('en-GB', { timeZone: tz });
 
   return `You are NinjaPA — a sharp, capable, no-nonsense personal AI assistant delivered via Telegram.
 
@@ -307,16 +320,21 @@ export async function processMessage(
   let pdfPath: string | undefined;
   let finalText = '';
 
+  const MODEL = process.env.CLAUDE_MODEL ?? 'claude-haiku-4-5-20251001';
+  const MAX_ITERATIONS = 5;
+
   // ── Agentic loop: Claude → tool call → result → Claude again ─────────────
   let response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',   // fast + cheap for daily use
+    model: MODEL,
     max_tokens: 2048,
     system: buildSystemPrompt(user),
     tools: TOOLS,
     messages,
   });
 
-  while (response.stop_reason === 'tool_use') {
+  let iterations = 0;
+  while (response.stop_reason === 'tool_use' && iterations < MAX_ITERATIONS) {
+    iterations++;
     const assistantMsg: Anthropic.MessageParam = { role: 'assistant', content: response.content };
     messages.push(assistantMsg);
 
@@ -326,7 +344,12 @@ export async function processMessage(
       if (block.type !== 'tool_use') continue;
 
       console.log(`[NinjaPA] Tool call: ${block.name}`, block.input);
-      const result = await executeTool(userId, block.name, block.input);
+      let result: any;
+      try {
+        result = await executeTool(userId, block.name, block.input);
+      } catch (err: any) {
+        result = { error: err.message ?? 'Tool execution failed' };
+      }
       console.log(`[NinjaPA] Tool result:`, result);
 
       // Capture PDF path if invoice was generated
@@ -344,7 +367,7 @@ export async function processMessage(
     messages.push({ role: 'user', content: toolResults });
 
     response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL,
       max_tokens: 2048,
       system: buildSystemPrompt(user),
       tools: TOOLS,

@@ -3,7 +3,7 @@
  * Starts the Telegram bot and the reminder scheduler.
  */
 import 'dotenv/config';
-import { createBot, createNotifier } from './bot.js';
+import { createBot, createNotifier, startQuoteScheduler } from './bot.js';
 import { startScheduler } from './scheduler.js';
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -24,6 +24,9 @@ const notify = createNotifier(bot);
 
 // Start the reminder + flight scheduler
 startScheduler(notify);
+
+// Start morning / noon / evening quote scheduler
+startQuoteScheduler(bot);
 
 // Launch the bot (long polling)
 bot.launch({

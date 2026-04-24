@@ -1,6 +1,5 @@
 /**
  * NinjaPA — SQLite database schema + all CRUD operations.
- * One file keeps it simple — no ORM needed.
  */
 import Database from 'better-sqlite3';
 import path from 'path';
@@ -20,8 +19,9 @@ db.exec(`
     id          INTEGER PRIMARY KEY,   -- Telegram user ID
     username    TEXT,
     first_name  TEXT,
-    plan        TEXT NOT NULL DEFAULT 'free',   -- 'free' | 'pro'
-    profile     TEXT NOT NULL DEFAULT '{}',     -- JSON: age, weight, goals etc
+    plan        TEXT NOT NULL DEFAULT 'free',
+    timezone    TEXT NOT NULL DEFAULT 'Europe/London',
+    profile     TEXT NOT NULL DEFAULT '{}',
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -30,8 +30,8 @@ db.exec(`
     user_id     INTEGER NOT NULL REFERENCES users(id),
     title       TEXT NOT NULL,
     description TEXT,
-    priority    TEXT NOT NULL DEFAULT 'medium',  -- 'low'|'medium'|'high'
-    due_at      TEXT,                             -- ISO datetime
+    priority    TEXT NOT NULL DEFAULT 'medium',
+    due_at      TEXT,
     completed   INTEGER NOT NULL DEFAULT 0,
     completed_at TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -41,9 +41,9 @@ db.exec(`
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER NOT NULL REFERENCES users(id),
     message     TEXT NOT NULL,
-    cron_expr   TEXT,          -- cron for recurring  e.g. "0 9 * * *"
-    once_at     TEXT,          -- ISO datetime for one-shot
-    type        TEXT NOT NULL, -- 'once' | 'recurring'
+    cron_expr   TEXT,
+    once_at     TEXT,
+    type        TEXT NOT NULL,
     active      INTEGER NOT NULL DEFAULT 1,
     last_fired  TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -53,7 +53,7 @@ db.exec(`
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER NOT NULL REFERENCES users(id),
     content     TEXT NOT NULL,
-    tags        TEXT NOT NULL DEFAULT '[]',  -- JSON array of strings
+    tags        TEXT NOT NULL DEFAULT '[]',
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -63,7 +63,7 @@ db.exec(`
     invoice_no   TEXT NOT NULL,
     client_name  TEXT NOT NULL,
     client_email TEXT,
-    items        TEXT NOT NULL,   -- JSON array: [{description, qty, rate}]
+    items        TEXT NOT NULL,
     currency     TEXT NOT NULL DEFAULT 'GBP',
     tax_pct      REAL NOT NULL DEFAULT 0,
     due_days     INTEGER NOT NULL DEFAULT 30,
@@ -74,11 +74,11 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS flight_watches (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      INTEGER NOT NULL REFERENCES users(id),
-    origin       TEXT NOT NULL,   -- IATA code e.g. LHR
-    destination  TEXT NOT NULL,   -- IATA code e.g. MAA
+    origin       TEXT NOT NULL,
+    destination  TEXT NOT NULL,
     max_price    REAL NOT NULL,
     currency     TEXT NOT NULL DEFAULT 'GBP',
-    travel_date  TEXT,            -- YYYY-MM-DD
+    travel_date  TEXT,
     last_price   REAL,
     last_checked TEXT,
     active       INTEGER NOT NULL DEFAULT 1,
@@ -88,7 +88,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS diet_plans (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER NOT NULL REFERENCES users(id),
-    content     TEXT NOT NULL,   -- full plan text from AI
+    content     TEXT NOT NULL,
     active      INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -96,11 +96,28 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS conversation_history (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER NOT NULL REFERENCES users(id),
-    role        TEXT NOT NULL,   -- 'user' | 'assistant'
+    role        TEXT NOT NULL,
     content     TEXT NOT NULL,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS daily_usage (
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    date        TEXT NOT NULL,
+    count       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, date)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tasks_user     ON tasks(user_id, completed);
+  CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, active);
+  CREATE INDEX IF NOT EXISTS idx_notes_user     ON notes(user_id);
+  CREATE INDEX IF NOT EXISTS idx_history_user   ON conversation_history(user_id, id);
 `);
+
+// Migrate existing DBs: add timezone column if missing
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Europe/London'`);
+} catch { /* column already exists */ }
 
 // ── User ──────────────────────────────────────────────────────────────────────
 export function upsertUser(id: number, username?: string, first_name?: string) {
@@ -125,6 +142,32 @@ export function updateProfile(userId: number, patch: Record<string, any>) {
   return merged;
 }
 
+export function setUserTimezone(userId: number, timezone: string) {
+  db.prepare('UPDATE users SET timezone = ? WHERE id = ?').run(timezone, userId);
+}
+
+export function getUserTimezone(userId: number): string {
+  const user = getUser(userId);
+  return user?.timezone ?? 'Europe/London';
+}
+
+// ── Rate limiting (DB-backed, survives restarts) ───────────────────────────────
+function todayUTC(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function getDailyUsage(userId: number): number {
+  const row = db.prepare('SELECT count FROM daily_usage WHERE user_id = ? AND date = ?').get(userId, todayUTC()) as any;
+  return row?.count ?? 0;
+}
+
+export function incrementDailyUsage(userId: number) {
+  db.prepare(`
+    INSERT INTO daily_usage (user_id, date, count) VALUES (?, ?, 1)
+    ON CONFLICT(user_id, date) DO UPDATE SET count = count + 1
+  `).run(userId, todayUTC());
+}
+
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 export function addTask(userId: number, title: string, opts: {
   description?: string; priority?: string; due_at?: string
@@ -136,9 +179,10 @@ export function addTask(userId: number, title: string, opts: {
 }
 
 export function listTasks(userId: number, includeCompleted = false) {
+  const priorityOrder = `CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`;
   const q = includeCompleted
-    ? 'SELECT * FROM tasks WHERE user_id = ? ORDER BY completed ASC, due_at ASC, created_at DESC'
-    : 'SELECT * FROM tasks WHERE user_id = ? AND completed = 0 ORDER BY due_at ASC, created_at DESC';
+    ? `SELECT * FROM tasks WHERE user_id = ? ORDER BY completed ASC, ${priorityOrder}, due_at ASC`
+    : `SELECT * FROM tasks WHERE user_id = ? AND completed = 0 ORDER BY ${priorityOrder}, due_at ASC`;
   return db.prepare(q).all(userId) as any[];
 }
 
@@ -264,7 +308,6 @@ export function getActiveDietPlan(userId: number) {
 // ── Conversation History ──────────────────────────────────────────────────────
 export function appendHistory(userId: number, role: 'user' | 'assistant', content: string) {
   db.prepare('INSERT INTO conversation_history (user_id, role, content) VALUES (?, ?, ?)').run(userId, role, content);
-  // Keep last 20 messages per user
   db.prepare(`
     DELETE FROM conversation_history WHERE user_id = ? AND id NOT IN (
       SELECT id FROM conversation_history WHERE user_id = ? ORDER BY id DESC LIMIT 20
