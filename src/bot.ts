@@ -5,9 +5,10 @@
 import { Telegraf, Context, Markup } from 'telegraf';
 import { message } from 'telegraf/filters';
 import fs from 'fs';
-import { upsertUser, getUser, getDailyUsage, incrementDailyUsage, touchLastActive, listTasks, completeTask, deleteTask, listReminders, cancelReminder } from './db.js';
+import { upsertUser, getUser, getDailyUsage, incrementDailyUsage, touchLastActive, listTasks, completeTask, deleteTask, listReminders, cancelReminder, setUserTimezone } from './db.js';
 import { processMessage } from './ai.js';
 import { cancelScheduledReminder } from './scheduler.js';
+import { find as findTimezone } from 'geo-tz';
 
 const FREE_DAILY_LIMIT = parseInt(process.env.FREE_TASKS_PER_DAY ?? '10');
 
@@ -29,6 +30,10 @@ export function createBot(token: string) {
     const { id, username, first_name } = ctx.from;
     upsertUser(id, username, first_name);
 
+    const locationKeyboard = Markup.keyboard([
+      [Markup.button.locationRequest('📍 Share my location (sets timezone automatically)')],
+    ]).resize().oneTime();
+
     await ctx.replyWithMarkdown(
       `👋 Hey ${first_name ?? 'there'}! I'm *NinjaPA* — your personal AI assistant.\n\n` +
       `📋 *Tasks & Reminders* — _"Remind me to call dentist tomorrow 3pm"_\n` +
@@ -39,9 +44,36 @@ export function createBot(token: string) {
       `🗺️ *Travel* — _"Plan a 5-day Tokyo trip, budget £2000"_\n` +
       `⏰ *Standup* — _"Remind me to stand up every 45 minutes"_\n\n` +
       `Just talk to me naturally — no commands needed.\n\n` +
-      `💡 *First, tell me your timezone* so reminders fire at the right time:\n` +
-      `_"I'm in India"_ or _"My timezone is America/New_York"_\n\n` +
-      `Let's go! 🥷`
+      `💡 *One quick step:* share your location so reminders fire at the right local time 👇`,
+      locationKeyboard
+    );
+  });
+
+  // ── Location handler: auto-detect timezone ────────────────────────────────
+  bot.on(message('location'), async (ctx) => {
+    const { latitude, longitude } = ctx.message.location;
+    const userId = ctx.from.id;
+    upsertUser(userId, ctx.from.username, ctx.from.first_name);
+
+    const zones = findTimezone(latitude, longitude);
+    const tz = zones[0];
+
+    if (!tz) {
+      await ctx.reply('⚠️ Could not determine timezone from your location. Please type it instead, e.g. "My timezone is Asia/Kolkata".');
+      return;
+    }
+
+    setUserTimezone(userId, tz);
+    touchLastActive(userId);
+
+    const localTime = new Date().toLocaleString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+
+    await ctx.replyWithMarkdown(
+      `✅ *Timezone set: ${tz}*\n` +
+      `🕐 Your local time: ${localTime}\n\n` +
+      `Your reminders and daily digest will now fire at the right time for you.\n\n` +
+      `Let's go! 🥷`,
+      Markup.removeKeyboard()
     );
   });
 
