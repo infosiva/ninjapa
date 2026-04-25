@@ -5,42 +5,11 @@
 import { Telegraf, Context, Markup } from 'telegraf';
 import { message } from 'telegraf/filters';
 import fs from 'fs';
-import cron from 'node-cron';
-import { upsertUser, getUser, getDailyUsage, incrementDailyUsage, listTasks, completeTask, deleteTask, listReminders, cancelReminder } from './db.js';
+import { upsertUser, getUser, getDailyUsage, incrementDailyUsage, touchLastActive, listTasks, completeTask, deleteTask, listReminders, cancelReminder } from './db.js';
 import { processMessage } from './ai.js';
 import { cancelScheduledReminder } from './scheduler.js';
 
 const FREE_DAILY_LIMIT = parseInt(process.env.FREE_TASKS_PER_DAY ?? '10');
-
-// ── Quotes for morning / noon / evening ───────────────────────────────────────
-const QUOTES = {
-  morning: [
-    '🌅 *Good morning!* "The secret of getting ahead is getting started." — Mark Twain',
-    '🌅 *Good morning!* "What you do today can improve all your tomorrows." — Ralph Marston',
-    '🌅 *Good morning!* "Each morning we are born again. What we do today matters most." — Buddha',
-    '🌅 *Good morning!* "Wake up with determination. Go to bed with satisfaction."',
-    '🌅 *Good morning!* "Your future is created by what you do today, not tomorrow." — Robert Kiyosaki',
-  ],
-  noon: [
-    '☀️ *Midday check-in!* Half the day done — how are your tasks going? 💪',
-    '☀️ *Lunch break reminder!* Step away, eat well, recharge. You\'ve earned it.',
-    '☀️ *Midday boost!* "It does not matter how slowly you go as long as you do not stop." — Confucius',
-    '☀️ *Noon nudge!* Take a 5-minute walk. Your afternoon self will thank you.',
-    '☀️ *Midday check-in!* "Believe you can and you\'re halfway there." — Theodore Roosevelt',
-  ],
-  night: [
-    '🌙 *Good evening!* "Almost everything will work again if you unplug it for a few minutes — including you." — Anne Lamott',
-    '🌙 *Wind down time!* Review today\'s wins, forgive the misses, plan tomorrow.',
-    '🌙 *Good evening!* "Rest when you\'re weary. Refresh and renew yourself, your body, your mind." — Ralph Marston',
-    '🌙 *Evening reminder!* Hydrate, stretch, disconnect. Tomorrow is a fresh start.',
-    '🌙 *Good night!* "The day is over, night has come. Today is gone, what\'s done is done." — poem',
-  ],
-};
-
-function randomQuote(type: keyof typeof QUOTES): string {
-  const list = QUOTES[type];
-  return list[Math.floor(Math.random() * list.length)];
-}
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 function isAllowed(userId: number): boolean {
@@ -186,6 +155,7 @@ export function createBot(token: string) {
     }
 
     incrementDailyUsage(userId);
+    touchLastActive(userId);
     await handleMessage(ctx, userId, ctx.message.text);
   });
 
@@ -303,24 +273,3 @@ export function createNotifier(bot: Telegraf) {
   };
 }
 
-// ── Daily quote scheduler ─────────────────────────────────────────────────────
-export function startQuoteScheduler(bot: Telegraf) {
-  // Morning quote — 8 AM UTC (adjust per user TZ is done in scheduler via user.timezone)
-  cron.schedule('0 8 * * *', () => sendQuotesToAll(bot, 'morning'));
-  // Noon nudge — 12 PM UTC
-  cron.schedule('0 12 * * *', () => sendQuotesToAll(bot, 'noon'));
-  // Evening wind-down — 7 PM UTC
-  cron.schedule('0 19 * * *', () => sendQuotesToAll(bot, 'night'));
-
-  console.log('[bot] Quote scheduler started (8am / 12pm / 7pm UTC).');
-}
-
-async function sendQuotesToAll(bot: Telegraf, type: keyof typeof QUOTES) {
-  const { db } = await import('./db.js');
-  // Only send to pro users (free users get it as a taster once, then upgrade)
-  const users = db.prepare("SELECT id FROM users WHERE plan = 'pro'").all() as { id: number }[];
-  const quote = randomQuote(type);
-  for (const user of users) {
-    bot.telegram.sendMessage(user.id, quote, { parse_mode: 'Markdown' }).catch(() => {});
-  }
-}

@@ -114,10 +114,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_history_user   ON conversation_history(user_id, id);
 `);
 
-// Migrate existing DBs: add timezone column if missing
-try {
-  db.exec(`ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Europe/London'`);
-} catch { /* column already exists */ }
+// Migrations: add columns safely
+const migrations = [
+  `ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Europe/London'`,
+  `ALTER TABLE users ADD COLUMN last_active TEXT`,
+  `ALTER TABLE users ADD COLUMN last_digest_at TEXT`,
+  `ALTER TABLE users ADD COLUMN last_weekly_review_at TEXT`,
+];
+for (const sql of migrations) {
+  try { db.exec(sql); } catch { /* column already exists */ }
+}
 
 // ── User ──────────────────────────────────────────────────────────────────────
 export function upsertUser(id: number, username?: string, first_name?: string) {
@@ -149,6 +155,70 @@ export function setUserTimezone(userId: number, timezone: string) {
 export function getUserTimezone(userId: number): string {
   const user = getUser(userId);
   return user?.timezone ?? 'Europe/London';
+}
+
+export function touchLastActive(userId: number) {
+  db.prepare("UPDATE users SET last_active = datetime('now') WHERE id = ?").run(userId);
+}
+
+export function markDigestSent(userId: number) {
+  db.prepare("UPDATE users SET last_digest_at = datetime('now') WHERE id = ?").run(userId);
+}
+
+export function markWeeklyReviewSent(userId: number) {
+  db.prepare("UPDATE users SET last_weekly_review_at = datetime('now') WHERE id = ?").run(userId);
+}
+
+export function getAllUsers(): any[] {
+  return db.prepare('SELECT * FROM users').all() as any[];
+}
+
+export function getTasksDueToday(userId: number, todayStr: string): any[] {
+  return db.prepare(`
+    SELECT * FROM tasks
+    WHERE user_id = ? AND completed = 0
+    AND due_at IS NOT NULL AND substr(due_at, 1, 10) = ?
+    ORDER BY due_at ASC
+  `).all(userId, todayStr) as any[];
+}
+
+export function getOverdueTasks(userId: number, todayStr: string): any[] {
+  return db.prepare(`
+    SELECT * FROM tasks
+    WHERE user_id = ? AND completed = 0
+    AND due_at IS NOT NULL AND substr(due_at, 1, 10) < ?
+    ORDER BY due_at ASC
+  `).all(userId, todayStr) as any[];
+}
+
+export function getCompletedThisWeek(userId: number): any[] {
+  return db.prepare(`
+    SELECT * FROM tasks
+    WHERE user_id = ? AND completed = 1
+    AND completed_at >= datetime('now', '-7 days')
+  `).all(userId) as any[];
+}
+
+export function getInvoicesTotalThisMonth(userId: number): { count: number; total: number } {
+  const invoices = db.prepare(`
+    SELECT items, tax_pct FROM invoices WHERE user_id = ?
+    AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
+  `).all(userId) as any[];
+  let total = 0;
+  for (const inv of invoices) {
+    const items = JSON.parse(inv.items ?? '[]');
+    const sub = items.reduce((s: number, i: any) => s + (i.qty * i.rate), 0);
+    total += sub * (1 + (inv.tax_pct / 100));
+  }
+  return { count: invoices.length, total: Math.round(total) };
+}
+
+export function getUsersInactiveForDays(days: number): any[] {
+  return db.prepare(`
+    SELECT * FROM users
+    WHERE last_active IS NOT NULL
+    AND last_active < datetime('now', '-${days} days')
+  `).all() as any[];
 }
 
 // ── Rate limiting (DB-backed, survives restarts) ───────────────────────────────

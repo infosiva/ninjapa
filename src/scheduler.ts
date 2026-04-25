@@ -6,6 +6,7 @@
 import cron from 'node-cron';
 import { getAllActiveReminders, markReminderFired, deactivateReminder } from './db.js';
 import { checkAllFlightWatches } from './tools/flights.js';
+import { runDigestHeartbeat } from './digest.js';
 
 type NotifyFn = (userId: number, message: string) => void;
 
@@ -81,11 +82,17 @@ export function startScheduler(notify: NotifyFn) {
   console.log(`[scheduler] Loading ${reminders.length} active reminders...`);
   reminders.forEach(scheduleReminder);
 
-  // Daily flight price check at 8 AM
+  // Daily flight price check at 8 AM UTC
   cron.schedule('0 8 * * *', () => {
     console.log('[scheduler] Running daily flight price checks...');
     checkAllFlightWatches((userId, msg) => notify(userId, msg));
   });
 
-  console.log('[scheduler] Ready.');
+  // Digest heartbeat — runs every 30 min, sends morning/evening/weekly/nudge
+  // at the right local time per user
+  cron.schedule('*/30 * * * *', () => {
+    runDigestHeartbeat(notify).catch(e => console.error('[digest] Heartbeat error:', e));
+  });
+
+  console.log('[scheduler] Ready. Digest heartbeat every 30 min.');
 }
