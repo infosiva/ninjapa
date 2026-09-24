@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NinjaPA — AI Personal Assistant on Telegram</title>
+  <meta name="description" content="Tasks, reminders, invoices, flight alerts, diet plans. No app to install — just message @ninjapa_aibot on Telegram." />
+  <meta property="og:title" content="NinjaPA — AI Personal Assistant on Telegram" />
+  <meta property="og:description" content="Tasks, reminders, invoices, flight alerts, diet plans. No app to install — just message @ninjapa_aibot." />
+  <meta property="og:url" content="https://ninjapa.app" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥷</text></svg>" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #08080f;
+      --surface: #111118;
+      --surface2: #18181f;
+      --border: rgba(255,255,255,0.07);
+      --accent: #7c3aed;
+      --tg: #0088cc;
+      --text: #f0f0f8;
+      --muted: #6b7280;
+      --muted2: #9ca3af;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Layout shell ── */
+    .shell {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 48px 1fr 32px;
+    }
+
+    /* ── Nav ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8,8,15,0.9);
+      backdrop-filter: blur(12px);
+    }
+    .logo {
+      font-size: 1rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: .4rem;
+      letter-spacing: -.01em;
+    }
+    .nav-pill {
+      background: rgba(0,136,204,.12);
+      border: 1px solid rgba(0,136,204,.25);
+      color: #38bdf8;
+      padding: .28rem .85rem;
+      border-radius: 99px;
+      font-size: .78rem;
+      font-weight: 600;
+    }
+    .btn-tg {
+      background: var(--tg);
+      color: #fff;
+      padding: .35rem 1rem;
+      border-radius: 99px;
+      font-size: .8rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: .35rem;
+      transition: opacity .15s;
+    }
+    .btn-tg:hover { opacity: .85; }
+
+    /* ── Main two-column layout ── */
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      overflow: hidden;
+    }
+
+    /* ── Left panel ── */
+    .left {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 1.5rem 2.5rem 1.5rem 2.5rem;
+      gap: 1rem;
+      border-right: 1px solid var(--border);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      background: rgba(124,58,237,.1);
+      border: 1px solid rgba(124,58,237,.25);
+      color: #a78bfa;
+      padding: .25rem .75rem;
+      border-radius: 99px;
+      font-size: .73rem;
+      font-weight: 600;
+      width: fit-content;
+    }
+
+    h1 {
+      font-size: clamp(1.7rem, 2.8vw, 2.4rem);
+      font-weight: 800;
+      line-height: 1.18;
+      letter-spacing: -.02em;
+    }
+    .grad {
+      background: linear-gradient(135deg, #a78bfa 0%, #38bdf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .tagline {
+      color: var(--muted2);
+      font-size: .88rem;
+      line-height: 1.55;
+      max-width: 380px;
+    }
+
+    .cta-row {
+      display: flex;
+      gap: .6rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .btn-main {
+      background: var(--tg);
+      color: #fff;
+      padding: .6rem 1.4rem;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: .88rem;
+      display: flex;
+      align-items: center;
+      gap: .4rem;
+      transition: transform .15s, box-shadow .15s;
+      box-shadow: 0 4px 20px rgba(0,136,204,.25);
+    }
+    .btn-main:hover { transform: translateY(-1px); box-shadow: 0 6px 28px rgba(0,136,204,.35); }
+    .btn-ghost {
+      border: 1px solid var(--border);
+      padding: .6rem 1.1rem;
+      border-radius: 10px;
+      font-size: .82rem;
+      color: var(--muted2);
+      font-weight: 500;
+      transition: border-color .15s, color .15s;
+    }
+    .btn-ghost:hover { border-color: rgba(255,255,255,.18); color: var(--text); }
+
+    /* ── Feature pills grid ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: .4rem;
+    }
+    .feat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .45rem .5rem;
+      display: flex;
+      align-items: center;
+      gap: .35rem;
+      font-size: .72rem;
+      color: var(--muted2);
+      font-weight: 500;
+      transition: border-color .15s, color .15s;
+      cursor: default;
+    }
+    .feat:hover { border-color: rgba(124,58,237,.3); color: var(--text); }
+    .feat span:first-child { font-size: .9rem; flex-shrink: 0; }
+
+    /* ── Divider text ── */
+    .divider-text {
+      font-size: .68rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 600;
+    }
+
+    /* ── Right panel ── */
+    .right {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      overflow: hidden;
+    }
+
+    /* ── Chat demo ── */
+    .chat {
+      padding: 1.5rem 2rem 1rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: .55rem;
+      overflow: hidden;
+    }
+    .chat-label {
+      font-size: .68rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 600;
+      margin-bottom: .2rem;
+    }
+    .bubble {
+      padding: .55rem .85rem;
+      border-radius: 14px;
+      font-size: .78rem;
+      max-width: 82%;
+      line-height: 1.45;
+    }
+    .bubble.u {
+      background: var(--tg);
+      color: #fff;
+      align-self: flex-end;
+      border-bottom-right-radius: 4px;
+    }
+    .bubble.b {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      align-self: flex-start;
+      border-bottom-left-radius: 4px;
+    }
+    .bubble.b em { color: #a78bfa; font-style: normal; font-weight: 600; }
+
+    /* ── Pricing strip ── */
+    .pricing-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-top: 1px solid var(--border);
+    }
+    .plan {
+      padding: .85rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .plan + .plan { border-left: 1px solid var(--border); }
+    .plan.pro { background: rgba(124,58,237,.04); }
+    .plan-info { display: flex; flex-direction: column; gap: .15rem; }
+    .plan-name { font-size: .72rem; font-weight: 700; color: var(--muted2); text-transform: uppercase; letter-spacing: .06em; }
+    .plan-price { font-size: 1.3rem; font-weight: 800; letter-spacing: -.02em; }
+    .plan-price span { font-size: .72rem; font-weight: 400; color: var(--muted); }
+    .plan-perks { display: flex; flex-direction: column; gap: .12rem; }
+    .plan-perks p { font-size: .68rem; color: var(--muted); display: flex; align-items: center; gap: .3rem; }
+    .plan-perks p::before { content: '·'; color: #a78bfa; font-weight: 800; }
+    .btn-plan {
+      padding: .45rem 1rem;
+      border-radius: 8px;
+      font-size: .75rem;
+      font-weight: 700;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: opacity .15s;
+    }
+    .btn-plan:hover { opacity: .85; }
+    .btn-plan.free { background: var(--tg); color: #fff; }
+    .btn-plan.pro-btn { background: linear-gradient(135deg, #7c3aed, #38bdf8); color: #fff; }
+
+    /* ── Footer ── */
+    footer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+      padding: 0 2rem;
+      border-top: 1px solid var(--border);
+      font-size: .68rem;
+      color: var(--muted);
+    }
+    footer a { color: #a78bfa; }
+    footer a:hover { color: #c4b5fd; }
+
+    /* ── Ambient glow ── */
+    .glow {
+      position: fixed;
+      pointer-events: none;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: .12;
+    }
+    .glow-1 { width: 500px; height: 500px; background: #7c3aed; top: -150px; left: -100px; }
+    .glow-2 { width: 400px; height: 400px; background: #0088cc; bottom: -100px; right: 20%; }
+
+    /* ── Mobile: stack + allow scroll instead of clipping ── */
+    @media (max-width: 768px) {
+      html, body { overflow: auto; height: auto; }
+      .shell { height: auto; grid-template-rows: 48px auto 32px; }
+      main { grid-template-columns: 1fr; overflow: visible; }
+      .left { border-right: none; border-bottom: 1px solid var(--border); padding: 1.5rem; }
+      .tagline { max-width: 100%; }
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="glow glow-1"></div>
+<div class="glow glow-2"></div>
+
+<div class="shell">
+
+  <!-- Nav -->
+  <nav>
+    <div class="logo">🥷 NinjaPA</div>
+    <div class="nav-pill">🟢 Live on Telegram</div>
+    <a class="btn-tg" href="https://t.me/ninjapa_aibot">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+      Try Free
+    </a>
+  </nav>
+
+  <!-- Main -->
+  <main>
+
+    <!-- Left: Hero + features -->
+    <div class="left">
+      <div class="badge">🥷 AI-powered · No app needed</div>
+
+      <h1>Your <span class="grad">AI Personal<br>Assistant</span> —<br>always with you</h1>
+
+      <p class="tagline">Tasks, reminders, PDF invoices, flight alerts, diet plans, travel itineraries. Just message <strong>@ninjapa_aibot</strong> on Telegram — no signup, no friction.</p>
+
+      <div class="cta-row">
+        <a class="btn-main" href="https://t.me/ninjapa_aibot">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+          Open in Telegram — Free
+        </a>
+        <a class="btn-ghost" href="#pricing">View pricing ↓</a>
+      </div>
+
+      <div class="divider-text">Everything your PA should do</div>
+
+      <div class="features-grid">
+        <div class="feat"><span>📋</span> Tasks</div>
+        <div class="feat"><span>⏰</span> Reminders</div>
+        <div class="feat"><span>📄</span> Invoices</div>
+        <div class="feat"><span>✈️</span> Flights</div>
+        <div class="feat"><span>🥗</span> Diet Plans</div>
+        <div class="feat"><span>🗺️</span> Travel</div>
+        <div class="feat"><span>📝</span> Notes</div>
+        <div class="feat"><span>🌅</span> Quotes</div>
+      </div>
+    </div>
+
+    <!-- Right: Chat demo + pricing -->
+    <div class="right">
+
+      <div class="chat">
+        <div class="chat-label">Live demo — just like this in Telegram</div>
+
+        <div class="bubble u">Remind me to stand up every 45 mins, 9am–6pm</div>
+        <div class="bubble b">⏰ Done! Recurring standup set — every 45 min, 9am–6pm. That's <em>12 nudges a day</em>. Your back will thank you 🙌</div>
+
+        <div class="bubble u">Invoice Sarah Khan £1,200 for UI design work</div>
+        <div class="bubble b">📄 <em>INV-2504-001</em> generated · Sarah Khan · £1,200 UI design. PDF sent and saved to your records.</div>
+
+        <div class="bubble u">Watch London to Chennai flights under £350</div>
+        <div class="bubble b">✈️ Flight watch set! I'll check daily and ping you when <em>LHR → MAA drops below £350</em>. Market is ~£420 now.</div>
+
+        <div class="bubble u">I'm in India — set my timezone</div>
+        <div class="bubble b">🌏 Timezone set to <em>Asia/Kolkata</em> (IST). All your reminders will fire at the right local time.</div>
+      </div>
+
+      <!-- Pricing strip -->
+      <div class="pricing-strip" id="pricing">
+        <div class="plan">
+          <div class="plan-info">
+            <div class="plan-name">Free</div>
+            <div class="plan-price">£0 <span>/ forever</span></div>
+            <div class="plan-perks">
+              <p>10 messages/day</p>
+              <p>Tasks, reminders, notes</p>
+              <p>2 invoices/month · 1 flight watch</p>
+            </div>
+          </div>
+          <a class="btn-plan free" href="https://t.me/ninjapa_aibot">Start Free</a>
+        </div>
+        <div class="plan pro">
+          <div class="plan-info">
+            <div class="plan-name">✦ Pro</div>
+            <div class="plan-price">£7.99 <span>/ month</span></div>
+            <div class="plan-perks">
+              <p>Unlimited everything</p>
+              <p>10 flight watches · unlimited invoices</p>
+              <p>Daily motivation quotes</p>
+            </div>
+          </div>
+          <a class="btn-plan pro-btn" href="https://t.me/ninjapa_aibot">Coming Soon</a>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <span>🥷 NinjaPA — AI PA on Telegram</span>
+    <a href="https://t.me/ninjapa_aibot">@ninjapa_aibot</a>
+    <span>Built with Claude AI</span>
+    <span>© 2025 NinjaPA</span>
+  </footer>
+
+</div>
+
+</body>
+</html>
