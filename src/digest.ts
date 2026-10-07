@@ -16,6 +16,7 @@ import {
   getInvoicesTotalThisMonth, getUsersInactiveForDays,
   markDigestSent, markWeeklyReviewSent,
 } from './db.js';
+import { getWeatherSummary } from './tools/weather.js';
 
 type NotifyFn = (userId: number, message: string) => void;
 
@@ -59,7 +60,7 @@ function weeklyReviewSentThisWeek(user: any): boolean {
 const P: Record<string, string> = { high: '🔴', medium: '🟡', low: '🟢' };
 
 // ── Morning Digest ────────────────────────────────────────────────────────────
-function buildMorningDigest(user: any): string {
+async function buildMorningDigest(user: any): Promise<string> {
   const tz = user.timezone ?? 'Europe/London';
   const today = localDate(tz);
   const name = user.first_name ?? 'there';
@@ -71,8 +72,16 @@ function buildMorningDigest(user: any): string {
   const flights    = listFlightWatches(user.id);
   const invoices   = getInvoicesTotalThisMonth(user.id);
 
+  // Fetch weather if user has a location saved in profile
+  const profile = JSON.parse(user?.profile ?? '{}');
+  const weatherLocation = profile.location ?? profile.city ?? profile.address?.split(',')[0];
+  const weatherLine = weatherLocation
+    ? await getWeatherSummary(weatherLocation, tz).catch(() => null)
+    : null;
+
   let msg = `🌅 *Good morning, ${name}!*\n`;
   msg += `_${new Date().toLocaleDateString('en-GB', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' })}_\n`;
+  if (weatherLine) msg += `🌤️ ${weatherLine}\n`;
   msg += `─────────────────\n\n`;
 
   // Tasks due today
@@ -265,7 +274,7 @@ export async function runDigestHeartbeat(notify: NotifyFn) {
     // ── Morning digest at 8am ──────────────────────────────────────────────
     if (h === 8 && !digestSentToday(user)) {
       try {
-        notify(user.id, buildMorningDigest(user));
+        notify(user.id, await buildMorningDigest(user));
         markDigestSent(user.id);
         console.log(`[digest] Morning sent to ${user.id} (${tz})`);
       } catch (e) { console.error(`[digest] Error morning ${user.id}:`, e); }

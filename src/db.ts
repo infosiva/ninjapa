@@ -112,6 +112,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, active);
   CREATE INDEX IF NOT EXISTS idx_notes_user     ON notes(user_id);
   CREATE INDEX IF NOT EXISTS idx_history_user   ON conversation_history(user_id, id);
+
+  -- Tracks paid/rate-limited API call counts per service per day
+  -- Prevents surprise bills; triggers fallback when limit approached
+  CREATE TABLE IF NOT EXISTS api_quota (
+    service   TEXT NOT NULL,
+    date      TEXT NOT NULL,
+    count     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (service, date)
+  );
 `);
 
 // Migrations: add columns safely
@@ -387,6 +396,20 @@ export function appendHistory(userId: number, role: 'user' | 'assistant', conten
 
 export function getHistory(userId: number) {
   return db.prepare('SELECT role, content FROM conversation_history WHERE user_id = ? ORDER BY id ASC').all(userId) as { role: string; content: string }[];
+}
+
+// ── API Quota tracking (prevents surprise bills) ──────────────────────────────
+export function getApiQuota(service: string): number {
+  const row = db.prepare('SELECT count FROM api_quota WHERE service = ? AND date = ?').get(service, todayUTC()) as any;
+  return row?.count ?? 0;
+}
+
+export function incrementApiQuota(service: string): number {
+  db.prepare(`
+    INSERT INTO api_quota (service, date, count) VALUES (?, ?, 1)
+    ON CONFLICT(service, date) DO UPDATE SET count = count + 1
+  `).run(service, todayUTC());
+  return getApiQuota(service);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
