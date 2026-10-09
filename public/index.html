@@ -48,6 +48,15 @@ footer{padding:20px 0 40px;color:var(--muted);font-size:.85rem;display:flex;gap:
 footer a{color:var(--accent);min-height:44px;display:inline-flex;align-items:center}
 @media(max-width:800px){.days{gap:4px}.day{padding:6px 3px;font-size:.6rem}.chip{padding:4px 3px}.hero{grid-template-columns:1fr}.feats{grid-template-columns:repeat(2,1fr)}.plans{grid-template-columns:1fr}.day{min-width:0;overflow:hidden;min-height:120px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}.chip{opacity:1}}
+.fbb{position:fixed;right:16px;bottom:16px;z-index:50;min-height:44px;padding:0 18px;border-radius:999px;background:var(--accent);color:#fff;border:0;cursor:pointer;font:inherit;font-weight:700;box-shadow:0 4px 18px rgba(0,0,0,.25);transition:transform .12s}
+.fbb:active{transform:scale(.96)}
+#fbp{position:fixed;right:16px;bottom:72px;z-index:50;width:min(320px,calc(100vw - 32px));background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+#fbp[hidden]{display:none}#fbp h2{margin:0 0 8px;font-size:1rem}
+#fbp textarea,#fbp input{width:100%;min-height:44px;margin-bottom:8px;padding:8px;font:inherit;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+#fbp .btn{border:0;cursor:pointer;font:inherit;font-weight:700;color:#fff}
+#fbw{font-size:.88rem;color:var(--muted);margin-top:8px}
+body:has(#hb-c) .fbb{bottom:132px}body:has(#hb-c) #fbp{bottom:188px;max-height:calc(100vh - 210px);overflow:auto}
+@media(prefers-reduced-motion:reduce){.fbb{transition:none}}
 </style>
 </head>
 <body>
@@ -88,6 +97,16 @@ footer a{color:var(--accent);min-height:44px;display:inline-flex;align-items:cen
 </section>
 <footer><span>NinjaPA, an AI assistant on Telegram</span><a href="https://t.me/ninjapa_aibot">@ninjapa_aibot</a><span>Feedback: message the bot</span></footer>
 </div>
+<button class="fbb" id="fbb" type="button" aria-expanded="false" aria-controls="fbp">Feedback</button>
+<form id="fbp" hidden aria-label="Send feedback"><h2>Send feedback</h2><textarea id="fbm" rows="3" maxlength="1000" required aria-label="Your feedback"></textarea><input id="fbe" type="email" placeholder="Email (optional)" aria-label="Email (optional)"><button class="btn" type="submit">Send</button><p id="fbw" role="status"></p></form>
+<script>
+(function(){var b=document.getElementById('fbb'),f=document.getElementById('fbp'),w=document.getElementById('fbw');
+b.onclick=function(){var o=f.hidden;f.hidden=!o;b.setAttribute('aria-expanded',o)};
+f.addEventListener('keydown',function(e){if(e.key==='Escape'){f.hidden=true;b.setAttribute('aria-expanded',false);b.focus()}});
+/* ponytail: static site, no own API; posts to hub no-cors, so delivery cannot be confirmed */
+f.onsubmit=function(e){e.preventDefault();var d={message:f.fbm.value,page:location.pathname,site:'ninjapa'};if(f.fbe.value)d.email=f.fbe.value;
+fetch('https://ai-products-hub.vercel.app/api/feedback',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify(d)}).then(function(){w.textContent='Sent (delivery unconfirmed). Thank you.';f.reset()}).catch(function(){w.textContent='Could not send. You can also message the bot.'})}})();
+</script>
 <!--hub-theme-->
 <script>
 /* Hub runtime theme + consent-gated GA4 + anonymous usage/error log. Fetch fails => page keeps built-in design. No deps. */

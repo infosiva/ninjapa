@@ -17,3 +17,11 @@
 - Trigger: page load (ambient/entry), user press/hover (feedback).
 - Reduced-motion: `prefers-reduced-motion` handling present in the project's styles (verified by scan 2026-10-09).
 - Still open: `/review-animations` run (needs a running app, one at a time).
+
+## Gate gaps closed 2026-10-09
+- Stack verified: static public/index.html + Telegram bot (src/bot.ts, no /feedback command, no HTTP chat route). The 2026-10-05 line "no chat/feedback routes" is a design note, not an explicit gate exemption, so feedback was added.
+- 404: public/404.html (brand tokens, 44px home link, reduced-motion). Verified 375 + 1280 by click to "/".
+- Feedback: floating widget in public/index.html, posts {message,email?,page,site:"ninjapa"} to hub /api/feedback with no-cors; UI says "delivery unconfirmed". Payload read back with the endpoint stubbed (page.route). Sits above the consent banner (body:has(#hb-c)).
+- Chatbot: OWNER-BLOCKED. No chat route exists; the Telegram bot is the product's chat. Owner decides: embed a web chatbot (would need a server route + ai-core), or accept the bot as the exemption.
+- Promo: ASSUMPTION for owner to confirm: Pro is "planned, no price, nothing purchasable", so no promo/trial code system was built. Needed when Pro ships.
+- Not tested: live Vercel deploy (404.html serving, real hub receipt of feedback), /review-animations, screen reader.
