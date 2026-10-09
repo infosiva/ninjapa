@@ -9,3 +9,11 @@
 ## Runtime-switch + telemetry retrofit (2026-10-06) - files only, nothing committed
 - public/index.html: same hub-theme block (SITE=ninjapa, no GA id unless hub supplies one). api/usage.js (ESM, 204, JSON log; node --check ok). Backup: public/index.html.bak.
 - Not verified: Vercel deploy of api/usage, hub CORS/response shape, screenshots.
+
+
+## ANIMATED SCOPE (recorded 2026-10-09 sweep)
+- What moves: CSS keyframes already shipped: drift, hbf, hbs, pop, rise.
+- Why: ambient background + entry/press feedback on the product's core action; no motion carries information alone.
+- Trigger: page load (ambient/entry), user press/hover (feedback).
+- Reduced-motion: `prefers-reduced-motion` handling present in the project's styles (verified by scan 2026-10-09).
+- Still open: `/review-animations` run (needs a running app, one at a time).
